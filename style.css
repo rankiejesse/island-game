@@ -1,0 +1,82 @@
+/* 全局重置，适配手机触摸 */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+}
+
+body {
+    background: #1a1a2e;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    font-family: 'Arial', sans-serif;
+    touch-action: none; /* 禁止页面滚动 */
+}
+
+#gameCanvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    background: #87CEEB; /* 天空蓝 */
+    cursor: crosshair;
+    touch-action: none;
+}
+
+/* 顶部 UI 浮动层 */
+#ui {
+    position: fixed;
+    top: 10px;
+    left: 0;
+    width: 100%;
+    padding: 0 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 10;
+    pointer-events: none; /* 让点击穿透，但按钮要能点 */
+}
+
+#ui button,
+#ui span {
+    pointer-events: auto;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    padding: 8px 16px;
+    border-radius: 30px;
+    color: white;
+    font-size: 16px;
+    font-weight: bold;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+#ui button {
+    background: #e94560;
+    border-color: #ff6b81;
+    cursor: pointer;
+    transition: 0.2s;
+}
+#ui button:active {
+    transform: scale(0.92);
+    background: #c73652;
+}
+
+#status {
+    background: rgba(0, 0, 0, 0.5);
+    font-size: 14px;
+    padding: 6px 14px;
+    white-space: nowrap;
+}
+
+#scoreNum {
+    color: #ffd93d;
+    font-size: 20px;
+    margin-left: 4px;
+}
