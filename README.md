@@ -1,2 +1,2 @@
-# island-game
-play-island-game
+#game
+game练习
