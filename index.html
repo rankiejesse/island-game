@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🏝️ AI 荒岛求生日志</title>
+  <style>
+    body {
+      background-color: #1e1e2e;
+      color: #cdd6f4;
+      font-family: monospace;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    .panel {
+      background: #313244;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+    }
+    .status-bar {
+      display: flex;
+      justify-content: space-between;
+      font-size: 1.1em;
+      font-weight: bold;
+    }
+    #log {
+      height: 350px;
+      overflow-y: auto;
+      background: #181825;
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid #45475a;
+      white-space: pre-wrap;
+    }
+    input, button {
+      padding: 10px;
+      border-radius: 4px;
+      border: none;
+      margin-top: 5px;
+    }
+    input[type="text"] { width: 60%; background: #45475a; color: #fff; }
+    button { background: #a6e3a1; color: #11111b; cursor: pointer; font-weight: bold; }
+    button:disabled { background: #585b70; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+
+  <h1>🏝️ AI 荒岛求生日志 (AI Survival)</h1>
+
+  <!-- API 配置区 -->
+  <div class="panel">
+    <h3>⚙️ AI 接口设置</h3>
+    <input type="text" id="apiUrl" value="https://api.openai.com/v1/chat/completions" placeholder="API 接口地址">
+    <input type="text" id="apiKey" placeholder="输入你的 API Key (如 sk-...)">
+    <input type="text" id="modelName" value="gpt-4o-mini" placeholder="模型名称 (如 gpt-4o-mini / deepseek-chat)">
+    <button id="startBtn" onclick="startGame()">🚀 启动 AI 自动求生</button>
+  </div>
+
+  <!-- 数值状态栏 -->
+  <div class="panel status-bar" id="statusBar">
+    📅 天数: 1 | ❤️ 体力: 100 | 🍗 食物: 3 | 💧 淡水: 3 | 🪵 木材: 0
+  </div>
+
+  <!-- 游戏过程日志 -->
+  <div class="panel">
+    <h3>📜 生存广播终端</h3>
+    <div id="log">正在等待启动...</div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
