@@ -1,167 +1,24 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🏝️ AI 荒岛求生 (AI Interactive)</title>
-  <style>
-    body {
-      background-color: #1e1e2e;
-      color: #cdd6f4;
-      font-family: monospace;
-      max-width: 650px;
-      margin: 0 auto;
-      padding: 20px;
-    }
-    .panel {
-      background: #313244;
-      padding: 15px;
-      border-radius: 8px;
-      margin-bottom: 15px;
-      border: 1px solid #45475a;
-    }
-    .status-bar {
-      font-size: 1.1em;
-      font-weight: bold;
-      color: #f9e2af;
-      line-height: 1.8;
-    }
-    .event-box {
-      background: #181825;
-      padding: 15px;
-      border-radius: 6px;
-      color: #a6e3a1;
-      font-size: 1rem;
-      white-space: pre-wrap;
-    }
-    .controls {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 10px;
-      margin-top: 15px;
-    }
-    button {
-      padding: 12px;
-      background: #89b4fa;
-      color: #11111b;
-      border: none;
-      border-radius: 6px;
-      font-weight: bold;
-      font-size: 1rem;
-      cursor: pointer;
-    }
-    button:hover { background: #b4befe; }
-    #log {
-      height: 200px;
-      overflow-y: auto;
-      background: #11111b;
-      padding: 10px;
-      border-radius: 6px;
-      font-size: 0.9em;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>🐦 愤怒的小鸟 · 精简版</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-  <h1>🏝️ 荒岛求生终端</h1>
-
-  <!-- 1. 给 AI 看的当前数值状态 -->
-  <div class="panel">
-    <h3>📊 当前角色状态</h3>
-    <div class="status-bar" id="statusBar">
-      📅 天数: 第 1 / 10 天<br>
-      ❤️ 体力: 100 / 100<br>
-      🍗 食物: 3<br>
-      💧 淡水: 3<br>
-      🪵 木材: 0
-    </div>
-  </div>
-
-  <!-- 2. 给 AI 看的今日遭遇与可选项 -->
-  <div class="panel">
-    <h3>📢 今日遭遇与决策选项</h3>
-    <div class="event-box" id="eventBox">
-      正在载入游戏...
+    <!-- 顶部 UI -->
+    <div id="ui">
+        <button id="resetBtn">🔄 重来</button>
+        <span id="scoreDisplay">🐷 击中: <span id="scoreNum">0</span></span>
+        <span id="status">🎯 拖拽小鸟发射</span>
     </div>
 
-    <!-- 人类或前端替 AI 交互点击的按钮 -->
-    <div class="controls">
-      <button onclick="makeChoice(1)">选项 1</button>
-      <button onclick="makeChoice(2)">选项 2</button>
-      <button onclick="makeChoice(3)">选项 3</button>
-      <button onclick="makeChoice(4)">选项 4</button>
-    </div>
-  </div>
+    <!-- 游戏画布 -->
+    <canvas id="gameCanvas"></canvas>
 
-  <!-- 3. 历史记录 -->
-  <div class="panel">
-    <h3>📜 结算日志</h3>
-    <div id="log">游戏已就绪。</div>
-  </div>
-
-  <script>
-    let state = { day: 1, hp: 100, food: 3, water: 3, wood: 0, isOver: false };
-
-    const events = [
-      { text: "☀️ 太阳暴晒，热浪滚滚。\n1. 搜寻食物 (+2食物)\n2. 寻找淡水 (+2淡水)\n3. 砍伐木材 (+2木材, -10体力)\n4. 庇荫休息 (+20体力)", opts: [1,2,3,4] },
-      { text: "🌧️ 岛上下起了暴雨，气温骤降！\n1. 收集雨水 (+2淡水)\n2. 搜寻猎物 (+2食物)\n3. 强行砍树 (+2木材, -10体力)\n4. 生火取暖 (+20体力)", opts: [1,2,3,4] },
-      { text: "🐗 丛林深处传来野兽的低吼！\n1. 冒险打猎 (+2食物)\n2. 寻找果实 (+2食物)\n3. 制作防御陷阱 (+2木材, -10体力)\n4. 躲在营地休息 (+20体力)", opts: [1,2,3,4] }
-    ];
-
-    let currentEvt = events[0];
-
-    function render() {
-      document.getElementById('statusBar').innerHTML = `
-        📅 天数: 第 ${state.day} / 10 天<br>
-        ❤️ 体力: ${state.hp} / 100<br>
-        🍗 食物: ${state.food}<br>
-        💧 淡水: ${state.water}<br>
-        🪵 木材: ${state.wood}
-      `;
-
-      if (state.isOver) return;
-
-      document.getElementById('eventBox').innerText = 
-        `【第 ${state.day} 天】\n${currentEvt.text}\n\n🤖 提示AI：请根据上述数值，在回复中告诉我你选择第几个选项！`;
-    }
-
-    function makeChoice(choice) {
-      if (state.isOver) return;
-
-      // 每日扣除水粮
-      state.food--;
-      state.water--;
-
-      let resultText = "";
-      switch (choice) {
-        case 1: state.food += 2; resultText = "执行了选项1，获得食物 +2"; break;
-        case 2: state.water += 2; resultText = "执行了选项2，获得淡水 +2"; break;
-        case 3: state.wood += 2; state.hp -= 10; resultText = "执行了选项3，获得木材 +2，体力 -10"; break;
-        case 4: state.hp = Math.min(100, state.hp + 20); resultText = "执行了选项4，好好休息，体力 +20"; break;
-      }
-
-      const logDiv = document.getElementById('log');
-      logDiv.innerText = `第 ${state.day} 天结算：${resultText}\n` + logDiv.innerText;
-
-      // 死亡/通关判断
-      if (state.food < 0 || state.water < 0 || state.hp <= 0) {
-        state.hp = 0;
-        state.isOver = true;
-        document.getElementById('eventBox').innerText = "☠️ 游戏结束！AI 角色在荒岛上未能存活下来...";
-      } else if (state.day >= 10) {
-        state.isOver = true;
-        document.getElementById('eventBox').innerText = "🎉 成功通关！AI 角色成功存活了 10 天，救援队降落了！";
-      } else {
-        state.day++;
-        currentEvt = events[Math.floor(Math.random() * events.length)];
-      }
-
-      render();
-    }
-
-    // 初始化
-    currentEvt = events[Math.floor(Math.random() * events.length)];
-    render();
-  </script>
+    <!-- 引入物理引擎 & 主程序 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <script src="game.js"></script>
 </body>
 </html>
