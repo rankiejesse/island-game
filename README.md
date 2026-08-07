@@ -1,2 +1,2 @@
 # island-game
-ai-play-island-game
+play-island-game
