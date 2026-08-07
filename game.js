@@ -12,109 +12,138 @@ function resizeCanvas() {
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
 
-// ---------- Matter.js 引擎 ----------
+// ---------- Matter.js 引擎 (增加迭代次数防止结构崩塌) ----------
 const { Engine, World, Bodies, Body, Events, Vector } = Matter;
 const engine = Engine.create({
-    gravity: { x: 0, y: 1.2 }
+    gravity: { x: 0, y: 1.5 }
 });
+// 关键修复：提高迭代精度，建筑就不会自己倒了
+engine.positionIterations = 15;
+engine.velocityIterations = 10;
 const world = engine.world;
 
 // ---------- 游戏常量 ----------
-const SLING_X = W * 0.2;          // 弹弓位置 (左1/5处)
+const SLING_X = W * 0.2;
 const SLING_Y = H * 0.75;
-const MAX_DRAG = 80;              // 最大拖拽距离 (像素)
-const LAUNCH_POWER = 0.22;        // 发射力度系数
+const MAX_DRAG = 90;
+const LAUNCH_POWER = 0.25;
 
-let currentBird = null;           // 当前小鸟 Body
-let birdsRemaining = 3;           // 剩余小鸟数量
+let currentBird = null;
+let birdsRemaining = 4;
 let score = 0;
 let isDragging = false;
-let dragStartPos = { x: 0, y: 0 };
-
-// 存储动态物体(用于重置)
 let dynamicBodies = [];
 
-// ---------- 工具：创建带样式的物体 ----------
+// ---------- 工具函数：获取精确触摸/鼠标位置 (修复touchend取不到坐标的Bug) ----------
+function getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    let clientX, clientY;
+
+    if (e.touches && e.touches.length > 0) {
+        // 触摸移动/开始
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+    } else if (e.changedTouches && e.changedTouches.length > 0) {
+        // 关键修复：触摸结束(touchend)时用 changedTouches
+        clientX = e.changedTouches[0].clientX;
+        clientY = e.changedTouches[0].clientY;
+    } else {
+        // 鼠标事件
+        clientX = e.clientX;
+        clientY = e.clientY;
+    }
+
+    return {
+        x: (clientX - rect.left) * (canvas.width / rect.width),
+        y: (clientY - rect.top) * (canvas.height / rect.height)
+    };
+}
+
+// ---------- 创建物体 ----------
 function createBird(x, y) {
-    const body = Bodies.circle(x, y, 22, {
+    const body = Bodies.circle(x, y, 20, {
         label: 'bird',
-        friction: 0.5,
-        restitution: 0.4,
-        density: 0.002
+        friction: 0.8,
+        restitution: 0.05, // 减小弹性，防止乱弹
+        density: 0.002,
+        circleRadius: 20
     });
-    body.render = { fillStyle: '#e74c3c' };
     return body;
 }
 
 function createPig(x, y) {
-    const body = Bodies.circle(x, y, 18, {
+    const body = Bodies.circle(x, y, 16, {
         label: 'pig',
-        friction: 0.5,
-        restitution: 0.2,
-        density: 0.003
+        friction: 0.8,
+        restitution: 0.05,
+        density: 0.003,
+        circleRadius: 16
     });
-    body.render = { fillStyle: '#2ecc71' };
     return body;
 }
 
 function createBlock(x, y, w, h, color = '#d4a373') {
     const body = Bodies.rectangle(x, y, w, h, {
         label: 'block',
-        friction: 0.6,
-        restitution: 0.1,
+        friction: 0.9,
+        restitution: 0.02,
         density: 0.005
     });
     body.render = { fillStyle: color };
     return body;
 }
 
-// ---------- 搭建关卡 ----------
+// ---------- 搭建稳固关卡 (调整高度让建筑稳稳落地) ----------
 function buildLevel() {
-    // 清理旧物体 (保留地面和墙壁)
-    const toRemove = dynamicBodies.filter(b => b.label !== 'ground' && b.label !== 'wall');
+    const toRemove = [...dynamicBodies];
     World.remove(world, toRemove);
-    dynamicBodies = dynamicBodies.filter(b => b.label === 'ground' || b.label === 'wall');
+    dynamicBodies = [];
 
-    // 1. 地面 (宽大)
-    const ground = Bodies.rectangle(W / 2, H + 20, W + 100, 60, {
+    // 1. 地面 (直接放在画布底部)
+    const ground = Bodies.rectangle(W / 2, H + 10, W + 200, 60, {
         label: 'ground',
         isStatic: true,
-        friction: 0.8,
-        restitution: 0.1
+        friction: 0.9,
+        restitution: 0
     });
-    ground.render = { fillStyle: '#4a7c59' };
+    World.add(world, ground);
+    dynamicBodies.push(ground);
 
-    // 2. 左侧墙壁 (防止飞出左边)
-    const wall = Bodies.rectangle(-30, H / 2, 60, H * 2, {
+    // 2. 左右墙壁 (防止飞出)
+    const wallL = Bodies.rectangle(-30, H / 2, 60, H * 2, {
         label: 'wall',
         isStatic: true,
         friction: 0.5,
-        restitution: 0.3
+        restitution: 0
     });
-    wall.render = { fillStyle: '#2d3436' };
+    const wallR = Bodies.rectangle(W + 30, H / 2, 60, H * 2, {
+        label: 'wall',
+        isStatic: true,
+        friction: 0.5,
+        restitution: 0
+    });
+    World.add(world, [wallL, wallR]);
+    dynamicBodies.push(wallL, wallR);
 
-    World.add(world, [ground, wall]);
-    dynamicBodies.push(ground, wall);
-
-    // 3. 右侧建筑群 (小猪 + 木块/石块的混合结构)
+    // 3. 建筑群 (坐标重新计算，确保底部刚好接触地面，不会悬空摔散)
     const baseX = W * 0.7;
-    const baseY = H * 0.78;
+    const baseY = H - 70; // 直接贴地（地面顶部在 H-20 左右）
 
-    // 底层 - 3个宽木块
-    const b1 = createBlock(baseX - 60, baseY, 40, 20, '#c68c5c');
-    const b2 = createBlock(baseX, baseY, 40, 20, '#c68c5c');
-    const b3 = createBlock(baseX + 60, baseY, 40, 20, '#c68c5c');
-    // 中间小猪
-    const pig1 = createPig(baseX, baseY - 40);
-    // 第二层 - 横梁
-    const beam = createBlock(baseX, baseY - 70, 120, 16, '#b57c4a');
-    // 第二层两侧竖块
-    const b4 = createBlock(baseX - 45, baseY - 100, 20, 40, '#a67c52');
-    const b5 = createBlock(baseX + 45, baseY - 100, 20, 40, '#a67c52');
+    // 底层：3个宽扁木桩
+    const b1 = createBlock(baseX - 55, baseY, 34, 18, '#c68c5c');
+    const b2 = createBlock(baseX, baseY, 34, 18, '#c68c5c');
+    const b3 = createBlock(baseX + 55, baseY, 34, 18, '#c68c5c');
+    // 中间小猪 (落地)
+    const pig1 = createPig(baseX, baseY - 30);
+    // 横梁
+    const beam = createBlock(baseX, baseY - 55, 130, 14, '#b57c4a');
+    // 第二层立柱
+    const b4 = createBlock(baseX - 40, baseY - 80, 16, 34, '#a67c52');
+    const b5 = createBlock(baseX + 40, baseY - 80, 16, 34, '#a67c52');
     // 顶层小猪
-    const pig2 = createPig(baseX, baseY - 125);
-    // 顶层遮挡小方块(装饰)
-    const top = createBlock(baseX, baseY - 145, 40, 15, '#8b6b41');
+    const pig2 = createPig(baseX, baseY - 105);
+    // 顶层遮雨棚
+    const top = createBlock(baseX, baseY - 120, 60, 12, '#8b6b41');
 
     const blocks = [b1, b2, b3, beam, b4, b5, top];
     const pigs = [pig1, pig2];
@@ -122,7 +151,7 @@ function buildLevel() {
     World.add(world, [...blocks, ...pigs]);
     dynamicBodies.push(...blocks, ...pigs);
 
-    // 4. 创建弹弓上的小鸟
+    // 4. 生成初始小鸟
     createNewBird();
 }
 
@@ -133,94 +162,69 @@ function createNewBird() {
         currentBird = null;
     }
     if (birdsRemaining <= 0) {
-        statusSpan.innerText = '😵 小鸟用完了！点"重来"';
+        statusSpan.innerText = '😵 没小鸟了！点"重来"';
         return;
     }
 
     const bird = createBird(SLING_X, SLING_Y);
-    bird.isStatic = true;          // 初始固定在弹弓上
+    bird.isStatic = true;
     World.add(world, bird);
     dynamicBodies.push(bird);
     currentBird = bird;
     statusSpan.innerText = `🐦 剩余 ${birdsRemaining} 只 · 拖拽发射`;
 }
 
-// ---------- 重置游戏 ----------
+// ---------- 重置 ----------
 function resetGame() {
-    // 移除所有动态物体
     const allBodies = [...dynamicBodies];
     World.remove(world, allBodies);
     dynamicBodies = [];
     currentBird = null;
-    birdsRemaining = 3;
+    birdsRemaining = 4;
     score = 0;
     updateScore();
     isDragging = false;
     buildLevel();
-    statusSpan.innerText = '🔄 已重置，拖拽小鸟发射';
+    statusSpan.innerText = '🔄 已重置';
 }
 
-// ---------- 更新分数 UI ----------
 function updateScore() {
     scoreSpan.textContent = score;
 }
 
-// ---------- 碰撞检测 (小鸟撞击小猪) ----------
+// ---------- 碰撞检测 ----------
 Events.on(engine, 'collisionStart', (event) => {
     for (const pair of event.pairs) {
         const { bodyA, bodyB } = pair;
-        // 检查是否是小鸟撞小猪
         let bird = null, pig = null;
         if (bodyA.label === 'bird' && bodyB.label === 'pig') {
             bird = bodyA; pig = bodyB;
         } else if (bodyB.label === 'bird' && bodyA.label === 'pig') {
             bird = bodyB; pig = bodyA;
         }
-
         if (bird && pig) {
-            // 移除小猪 (加上一点延迟动画效果，直接移除)
             World.remove(world, pig);
             const idx = dynamicBodies.indexOf(pig);
             if (idx > -1) dynamicBodies.splice(idx, 1);
             score += 10;
             updateScore();
             statusSpan.innerText = '💥 击中！ +10分';
-            // 播放震动反馈 (可选)
             if (navigator.vibrate) navigator.vibrate(30);
         }
     }
 });
 
-// ---------- 触摸 / 鼠标 事件 ----------
-function getPos(e) {
-    const rect = canvas.getBoundingClientRect();
-    let clientX, clientY;
-    if (e.touches) {
-        clientX = e.touches[0].clientX;
-        clientY = e.touches[0].clientY;
-        e.preventDefault();
-    } else {
-        clientX = e.clientX;
-        clientY = e.clientY;
-    }
-    return {
-        x: (clientX - rect.left) * (canvas.width / rect.width),
-        y: (clientY - rect.top) * (canvas.height / rect.height)
-    };
-}
-
+// ---------- 事件绑定 (修复拖拽发射) ----------
 function onPointerDown(e) {
     e.preventDefault();
-    if (!currentBird || currentBird.isStatic === false) return;
+    if (!currentBird || !currentBird.isStatic) return;
 
     const pos = getPos(e);
     const dx = pos.x - SLING_X;
     const dy = pos.y - SLING_Y;
-    // 判断手指是否点在小鸟附近 (半径50px)
-    if (Math.sqrt(dx * dx + dy * dy) < 50) {
+    if (Math.sqrt(dx * dx + dy * dy) < 60) {
         isDragging = true;
-        dragStartPos = { x: pos.x, y: pos.y };
-        statusSpan.innerText = '🎯 瞄准中...';
+        statusSpan.innerText = '🎯 瞄准...';
     }
 }
 
@@ -233,19 +237,15 @@ function onPointerMove(e) {
     let dy = pos.y - SLING_Y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    // 限制最大拖拽距离 (橡皮筋效果)
     if (dist > MAX_DRAG) {
         dx = (dx / dist) * MAX_DRAG;
         dy = (dy / dist) * MAX_DRAG;
     }
-    // 不允许拖到弹弓右边 (防止反方向发射)
-    if (dx > 0) {
-        dx = 0;
-    }
-    // 更新小鸟位置 (锁定在弹弓上，跟随手指)
+    if (dx > 0) dx = 0; // 只准向后拉
+
     Body.setPosition(currentBird, { x: SLING_X + dx, y: SLING_Y + dy });
     Body.setVelocity(currentBird, { x: 0, y: 0 });
-    currentBird.isStatic = true; // 拖拽过程中保持静止
+    currentBird.isStatic = true;
 }
 
 function onPointerUp(e) {
@@ -256,45 +256,40 @@ function onPointerUp(e) {
     }
 
     isDragging = false;
-    const pos = getPos(e);
+    const pos = getPos(e); // 这里修复了！现在能正确拿到手指松开的位置
+
     let dx = pos.x - SLING_X;
     let dy = pos.y - SLING_Y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    // 如果拖拽距离太小 (小于10px) 当作取消发射
-    if (dist < 10) {
+    if (dist < 15) {
         Body.setPosition(currentBird, { x: SLING_X, y: SLING_Y });
-        statusSpan.innerText = '👆 拖远一点再松手';
+        statusSpan.innerText = '👆 拉远一点再松手';
         return;
     }
 
-    // 限制最大距离以计算速度
-    let limitedDx = dx, limitedDy = dy;
     if (dist > MAX_DRAG) {
-        limitedDx = (dx / dist) * MAX_DRAG;
-        limitedDy = (dy / dist) * MAX_DRAG;
+        dx = (dx / dist) * MAX_DRAG;
+        dy = (dy / dist) * MAX_DRAG;
     }
 
-    // 计算发射速度 (反向 * 力度系数)
+    // 计算发射速度
     const velocity = {
-        x: -limitedDx * LAUNCH_POWER,
-        y: -limitedDy * LAUNCH_POWER
+        x: -dx * LAUNCH_POWER,
+        y: -dy * LAUNCH_POWER
     };
 
-    // 释放小鸟
     currentBird.isStatic = false;
     Body.setVelocity(currentBird, velocity);
-    Body.setAngularVelocity(currentBird, 0.05);
 
-    statusSpan.innerText = '🚀 小鸟飞出去啦！';
+    statusSpan.innerText = '🚀 发射！';
     birdsRemaining--;
 
-    // 2秒后检查小鸟是否静止或飞出，生成下一只
+    // 自动回收并生成下一只
     setTimeout(() => {
         if (currentBird) {
             const v = currentBird.velocity;
             const speed = Math.sqrt(v.x * v.x + v.y * v.y);
-            // 如果速度很慢或者飞出边界，就回收
             if (speed < 0.5 || currentBird.position.y > H + 100 || currentBird.position.x > W + 100) {
                 World.remove(world, currentBird);
                 const idx = dynamicBodies.indexOf(currentBird);
@@ -303,21 +298,21 @@ function onPointerUp(e) {
                 createNewBird();
             }
         }
-    }, 2500);
+    }, 2000);
 
-    // 保险: 10秒后强制重置小鸟状态
+    // 10秒强制回收
     setTimeout(() => {
-        if (currentBird && currentBird.isStatic === false) {
+        if (currentBird && !currentBird.isStatic) {
             World.remove(world, currentBird);
             const idx = dynamicBodies.indexOf(currentBird);
             if (idx > -1) dynamicBodies.splice(idx, 1);
             currentBird = null;
             createNewBird();
         }
-    }, 10000);
+    }, 8000);
 }
 
-// 绑定事件 (同时支持鼠标和触摸)
+// 绑定事件
 canvas.addEventListener('mousedown', onPointerDown);
 canvas.addEventListener('mousemove', onPointerMove);
 canvas.addEventListener('mouseup', onPointerUp);
@@ -326,42 +321,45 @@ canvas.addEventListener('touchstart', onPointerDown, { passive: false });
 canvas.addEventListener('touchmove', onPointerMove, { passive: false });
 canvas.addEventListener('touchend', onPointerUp, { passive: false });
 
-// 重置按钮
 document.getElementById('resetBtn').addEventListener('click', resetGame);
 document.getElementById('resetBtn').addEventListener('touchstart', (e) => {
     e.preventDefault();
     resetGame();
 });
 
-// ---------- 自定义渲染循环 (绘制图形) ----------
+// ---------- 绘图循环 (修复眼睛显示) ----------
 function draw() {
     ctx.clearRect(0, 0, W, H);
 
-    // 绘制草地 (简单装饰)
-    ctx.fillStyle = '#7cc46c';
-    ctx.fillRect(0, H * 0.85, W, H * 0.15);
+    // 天空渐变
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#4facfe');
+    grad.addColorStop(1, '#e0f2fe');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
 
-    // 绘制弹弓支架 (两个叉)
+    // 草地
+    ctx.fillStyle = '#7cc46c';
+    ctx.fillRect(0, H - 30, W, 30);
+
+    // 弹弓
     ctx.strokeStyle = '#4a2c1a';
     ctx.lineWidth = 8;
     ctx.lineCap = 'round';
-    // 左叉
     ctx.beginPath();
     ctx.moveTo(SLING_X - 12, SLING_Y - 10);
     ctx.lineTo(SLING_X - 8, SLING_Y - 45);
     ctx.stroke();
-    // 右叉
     ctx.beginPath();
     ctx.moveTo(SLING_X + 12, SLING_Y - 10);
     ctx.lineTo(SLING_X + 8, SLING_Y - 45);
     ctx.stroke();
-    // 底座
     ctx.fillStyle = '#5a3a1a';
     ctx.beginPath();
     ctx.arc(SLING_X, SLING_Y + 6, 14, 0, Math.PI * 2);
     ctx.fill();
 
-    // 绘制橡皮筋 (拖拽时)
+    // 橡皮筋
     if (isDragging && currentBird) {
         const bx = currentBird.position.x;
         const by = currentBird.position.y;
@@ -376,20 +374,19 @@ function draw() {
         ctx.lineTo(bx, by);
         ctx.stroke();
 
-        // 绘制瞄准轨迹 (虚线预测)
+        // 轨迹预测
         const dx = SLING_X - bx;
         const dy = SLING_Y - by;
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist > 10) {
-            const power = Math.min(dist / MAX_DRAG, 1) * 15;
-            const angle = Math.atan2(dy, dx);
-            ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+            const power = Math.min(dist / MAX_DRAG, 1) * 16;
+            ctx.strokeStyle = 'rgba(255,255,255,0.5)';
             ctx.lineWidth = 3;
             ctx.setLineDash([6, 8]);
             ctx.beginPath();
             for (let t = 0; t < 1; t += 0.04) {
-                const px = bx + dx * power * t * 0.5;
-                const py = by + dy * power * t * 0.5 + 0.5 * 980 * 0.001 * t * t * 60;
+                const px = bx + dx * power * t * 0.4;
+                const py = by + dy * power * t * 0.4 + 0.5 * 980 * 0.001 * t * t * 70;
                 if (t === 0) ctx.moveTo(px, py);
                 else ctx.lineTo(px, py);
             }
@@ -398,97 +395,92 @@ function draw() {
         }
     }
 
-    // 遍历并绘制所有物理物体
-    const allBodies = world.bodies;
-    for (const body of allBodies) {
-        const vertices = body.vertices;
-        if (!vertices) continue;
+    // 绘制所有物理物体
+    for (const body of world.bodies) {
+        const verts = body.vertices;
+        if (!verts || body.label === 'ground' || body.label === 'wall') continue;
 
         ctx.beginPath();
-        ctx.moveTo(vertices[0].x, vertices[0].y);
-        for (let i = 1; i < vertices.length; i++) {
-            ctx.lineTo(vertices[i].x, vertices[i].y);
-        }
+        ctx.moveTo(verts[0].x, verts[0].y);
+        for (let i = 1; i < verts.length; i++) ctx.lineTo(verts[i].x, verts[i].y);
         ctx.closePath();
 
-        // 根据标签上色
-        let fill = '#aaa', stroke = '#333';
+        let fill = '#aaa', stroke = '#555';
         if (body.label === 'bird') {
-            fill = '#e74c3c';
-            stroke = '#c0392b';
-        } else if (body.label === 'pig') {
-            fill = '#2ecc71';
-            stroke = '#27ae60';
-            // 画猪鼻子 (点在中心)
-            ctx.fillStyle = '#1e8449';
-            ctx.beginPath();
-            ctx.arc(body.position.x - 5, body.position.y - 3, 4, 0, Math.PI * 2);
+            fill = '#e74c3c'; stroke = '#c0392b';
+            ctx.fillStyle = fill;
             ctx.fill();
-            ctx.beginPath();
-            ctx.arc(body.position.x + 5, body.position.y - 3, 4, 0, Math.PI * 2);
-            ctx.fill();
-        } else if (body.label === 'ground' || body.label === 'wall') {
-            fill = (body.label === 'ground') ? '#4a7c59' : '#2d3436';
-            stroke = '#1e3d2b';
-        } else {
-            fill = body.render?.fillStyle || '#d4a373';
-            stroke = '#8b6b41';
-        }
-
-        ctx.fillStyle = fill;
-        ctx.fill();
-        ctx.strokeStyle = stroke;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // 画小鸟的眼睛
-        if (body.label === 'bird') {
+            ctx.strokeStyle = stroke;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            // 眼睛
             ctx.fillStyle = 'white';
             ctx.beginPath();
-            ctx.arc(body.position.x - 8, body.position.y - 5, 6, 0, Math.PI * 2);
+            ctx.arc(body.position.x - 6, body.position.y - 4, 5, 0, Math.PI * 2);
             ctx.fill();
             ctx.beginPath();
-            ctx.arc(body.position.x + 8, body.position.y - 5, 6, 0, Math.PI * 2);
+            ctx.arc(body.position.x + 6, body.position.y - 4, 5, 0, Math.PI * 2);
             ctx.fill();
             ctx.fillStyle = '#1a1a2e';
             ctx.beginPath();
-            ctx.arc(body.position.x - 6, body.position.y - 7, 3, 0, Math.PI * 2);
+            ctx.arc(body.position.x - 4, body.position.y - 6, 2.5, 0, Math.PI * 2);
             ctx.fill();
             ctx.beginPath();
-            ctx.arc(body.position.x + 10, body.position.y - 7, 3, 0, Math.PI * 2);
+            ctx.arc(body.position.x + 8, body.position.y - 6, 2.5, 0, Math.PI * 2);
             ctx.fill();
-            // 嘴巴 (三角形)
+            // 嘴巴
             ctx.fillStyle = '#f39c12';
             ctx.beginPath();
-            ctx.moveTo(body.position.x, body.position.y + 4);
-            ctx.lineTo(body.position.x - 8, body.position.y + 12);
-            ctx.lineTo(body.position.x + 8, body.position.y + 12);
+            ctx.moveTo(body.position.x, body.position.y + 3);
+            ctx.lineTo(body.position.x - 6, body.position.y + 10);
+            ctx.lineTo(body.position.x + 6, body.position.y + 10);
             ctx.closePath();
             ctx.fill();
+            continue;
         }
+        if (body.label === 'pig') {
+            fill = '#2ecc71'; stroke = '#27ae60';
+            ctx.fillStyle = fill;
+            ctx.fill();
+            ctx.strokeStyle = stroke;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            // 猪鼻孔
+            ctx.fillStyle = '#1e8449';
+            ctx.beginPath();
+            ctx.arc(body.position.x - 4, body.position.y - 2, 3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(body.position.x + 4, body.position.y - 2, 3, 0, Math.PI * 2);
+            ctx.fill();
+            continue;
+        }
+        // 木块
+        ctx.fillStyle = body.render?.fillStyle || '#d4a373';
+        ctx.fill();
+        ctx.strokeStyle = '#8b6b41';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
     }
 
-    // 显示剩余小鸟数 (右上角绘制小鸟图标)
-    ctx.font = '24px Arial';
-    ctx.fillStyle = 'rgba(0,0,0,0.4)';
-    ctx.fillText('🐦 x ' + birdsRemaining, W - 80, 50);
+    ctx.font = 'bold 20px Arial';
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillText('🐦 x ' + Math.max(0, birdsRemaining), W - 90, 45);
 
     requestAnimationFrame(draw);
 }
 
-// ---------- 更新物理循环 (独立运行) ----------
+// ---------- 物理更新 ----------
 function updatePhysics() {
     Engine.update(engine, 1000 / 60);
     requestAnimationFrame(updatePhysics);
 }
 
-// ---------- 启动游戏 ----------
+// ---------- 启动 ----------
 buildLevel();
 draw();
 updatePhysics();
 
-// 适配窗口变化重置画布尺寸
 window.addEventListener('resize', () => {
     resizeCanvas();
-    // 注意: 物理坐标不会变，但为了体验，不重置游戏，只是画布拉伸
 });
